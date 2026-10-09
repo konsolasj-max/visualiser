@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visualiser 0.1 beta</title>
+  <style>
+    /* Reset and fill browser canvas */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html { width: 100%; height: 100%; background: #1c1c1c; overflow: hidden; font-family: Arial, sans-serif; }
+
+    /* Fullscreen layout container */
+    .app-container {
+      display: flex;
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    /* Left Sidebar Toolbar matching the screenshot exactly */
+    .sidebar-toolbar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 50px;
+      height: 100%;
+      background: #111111;
+      border-right: 1px solid #2d2d2d;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 15px;
+      gap: 12px;
+      z-index: 100;
+    }
+
+    /* Square dark buttons matching the look */
+    .tool-btn {
+      width: 36px;
+      height: 36px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #ffffff;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 16px;
+      font-weight: bold;
+      transition: background 0.15s;
+    }
+    .tool-btn:hover {
+      background: #3a3a3a;
+      border-color: #666;
+    }
+
+    /* Centered video viewport creating the classic pillarbox bars */
+    .video-viewport {
+      flex: 1;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #000000;
+      padding-left: 50px; /* Leave room so video doesn't hide under sidebar */
+    }
+
+    /* Enforces 4:3 profile while scaling responsively to maximum window height */
+    .video-frame {
+      height: 100%;
+      aspect-ratio: 4 / 3;
+      max-width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      background: #050505;
+      position: relative;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      /* Animation transitions completely removed here for instant movement */
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    <!-- Left Sidebar Toolbar Overlay -->
+    <div class="sidebar-toolbar">
+      <button class="tool-btn" id="btn-mirror" title="Flip Horizontally">↔</button>
+      <button class="tool-btn" id="btn-flip" title="Flip Upside Down">↕</button>
+      <button class="tool-btn" id="btn-zoom" title="Zoom Loop">🔍</button>
+    </div>
+
+    <!-- Centered Visualizer Presentation Feed -->
+    <div class="video-viewport">
+      <div class="video-frame">
+        <video id="webcam-feed" autoplay playsinline></video>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const video = document.getElementById('webcam-feed');
+    let flipX = 1; // 1 = Normal, -1 = Horizontally Flipped
+    let flipY = 1; // 1 = Normal, -1 = Upside Down
+    
+    // Zoom stages: 1x (Normal overview) and 1.6x (Tight crop view)
+    const zoomStages = [1, 1.6];
+    let currentZoomIndex = 0;
+
+    // Pan tracking variables (Step counts range from -2 to +2)
+    let panStepX = 0;
+    let panStepY = 0;
+    const maxSteps = 2;
+    const moveAmountPerStep = 60; // Shifting distance in pixels per step
+
+    // Stream requests strict 4:3 resolution parameters
+    navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 800 },
+        height: { ideal: 600 },
+        aspectRatio: { ideal: 1.3333333333 }
+      },
+      audio: false
+    })
+    .then(stream => {
+      video.srcObject = stream;
+    })
+    .catch(err => {
+      console.error("Webcam configuration failed: ", err);
+      alert("Please ensure camera permissions are active.");
+    });
+
+    // Apply scaling, mirroring, rotation, and directional panning translations
+    function applyViewTransforms() {
+      const zoom = zoomStages[currentZoomIndex];
+      
+      // Calculate actual pixel translation based on current step index counters
+      const translateX = panStepX * moveAmountPerStep;
+      const translateY = panStepY * moveAmountPerStep;
+
+      // translate() must run BEFORE scale() in CSS to prevent layout inversion when flipped
+      video.style.transform = `translate(${translateX}px, ${translateY}px) scale(${flipX * zoom}, ${flipY * zoom})`;
+    }
+
+    // Horizontal Flip (↔ Button) - Toggles backward on click 1, returns to normal on click 2
+    document.getElementById('btn-mirror').addEventListener('click', () => {
+      flipX = flipX === 1 ? -1 : 1;
+      applyViewTransforms();
+    });
+
+    // Vertical Flip Upside Down (↕ Button) - Toggles upside down on click 1, returns to normal on click 2
+    document.getElementById('btn-flip').addEventListener('click', () => {
+      flipY = flipY === 1 ? -1 : 1;
+      applyViewTransforms();
+    });
+
+    // Zoom Multiplier Toggle (🔍 Button clicks jump between the 2 stages)
+    document.getElementById('btn-zoom').addEventListener('click', () => {
+      currentZoomIndex = (currentZoomIndex + 1) % zoomStages.length;
+      
+      // Auto-reset pan position to center if zooming back out to 1x overview
+      if (currentZoomIndex === 0) {
+        panStepX = 0;
+        panStepY = 0;
+      }
+      applyViewTransforms();
+    });
+
+    // Keyboard Arrow Listeners tracking the 2-step limits per direction
+    window.addEventListener('keydown', (e) => {
+      // Prevent keyboard scrolling actions on the screen container
+      if(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
+      }
+
+      switch(e.key) {
+        case "ArrowLeft":
+          if (panStepX < maxSteps) panStepX++; 
+          break;
+        case "ArrowRight":
+          if (panStepX > -maxSteps) panStepX--; 
+          break;
+        case "ArrowUp":
+          if (panStepY < maxSteps) panStepY++; 
+          break;
+        case "ArrowDown":
+          if (panStepY > -maxSteps) panStepY--; 
+          break;
+        default:
+          return; 
+      }
+      applyViewTransforms();
+    });
+  </script>
+</body>
+</html>
+
